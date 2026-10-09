@@ -1,0 +1,539 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>气象推演助手</title>
+<style>
+    :root {
+        --primary: #00f0ff;
+        --secondary: #7b61ff;
+        --bg-dark: #070913;
+        --card-bg: rgba(16, 22, 43, 0.65);
+        --glow: 0 0 15px rgba(0, 240, 255, 0.25);
+        --text-dim: #7e8c9e;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+        font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+        background-color: var(--bg-dark);
+        color: #fff; min-height: 100vh;
+        display: flex; align-items: center; justify-content: center;
+        overflow-y: auto; overflow-x: hidden;
+    }
+
+    .bg {
+        position: fixed; top:0; left:0; width:100%; height:100%; z-index: 0;
+        background: radial-gradient(circle at 50% 50%, #0d1226 0%, #070913 100%);
+    }
+    .bg::before {
+        content: ''; position: absolute; width: 800px; height: 800px;
+        background: radial-gradient(circle, rgba(123, 97, 255, 0.08) 0%, transparent 70%);
+        border-radius: 50%; top: -20%; left: -10%; filter: blur(60px);
+        animation: aurora 15s infinite alternate;
+    }
+    @keyframes aurora { 100% { transform: translate(100px, 100px) scale(1.2); } }
+
+    .glass-panel {
+        position: relative; z-index: 10;
+        width: 650px; max-width: 95vw;
+        background: var(--card-bg);
+        backdrop-filter: blur(25px); -webkit-backdrop-filter: blur(25px);
+        border: 1px solid rgba(0, 240, 255, 0.15);
+        border-radius: 28px; padding: 40px;
+        box-shadow: 0 25px 60px rgba(0,0,0,0.8), inset 0 0 40px rgba(0,240,255,0.03);
+        margin: 40px 0;
+    }
+
+    .search-header { display: flex; gap: 12px; margin-bottom: 30px; }
+    input {
+        flex: 1; padding: 16px 20px; border-radius: 14px;
+        border: 1px solid rgba(0, 240, 255, 0.2);
+        background: rgba(0,0,0,0.4); color: #fff; font-size: 16px; outline: none; transition: 0.3s;
+    }
+    input:focus { border-color: var(--primary); box-shadow: var(--glow); }
+    button {
+        padding: 0 32px; border-radius: 14px; border: none;
+        background: linear-gradient(135deg, var(--primary), var(--secondary));
+        color: #fff; font-size: 16px; font-weight: bold; cursor: pointer;
+        transition: 0.3s; letter-spacing: 2px;
+    }
+    button:hover { transform: translateY(-2px); box-shadow: 0 0 25px rgba(0,240,255,0.4); }
+    button:disabled { opacity: 0.4; transform: none; cursor: not-allowed; }
+
+    #initialState { text-align: center; padding: 40px 0; animation: fadeIn 1.5s ease; }
+    .standby-radar {
+        width: 100px; height: 100px; border-radius: 50%;
+        border: 1px dashed rgba(0, 240, 255, 0.3);
+        margin: 0 auto; position: relative;
+        animation: rotateStandby 20s linear infinite;
+    }
+    .standby-radar::after {
+        content: ''; position: absolute; inset: 15px;
+        border-radius: 50%; border: 1px solid rgba(0, 240, 255, 0.1);
+    }
+    .standby-text {
+        color: var(--text-dim); font-size: 14px; margin-top: 25px;
+        letter-spacing: 3px; font-family: monospace;
+    }
+    .quick-tips {
+        margin-top: 20px; font-size: 13px; color: var(--primary);
+        cursor: pointer; opacity: 0.7; transition: 0.3s;
+    }
+    .quick-tips:hover { opacity: 1; text-shadow: 0 0 10px var(--primary); }
+    @keyframes rotateStandby { 100% { transform: rotate(360deg); } }
+    @keyframes fadeIn { 0% { opacity: 0; transform: translateY(10px); } 100% { opacity: 1; transform: translateY(0); } }
+
+    #loader { display: none; flex-direction: column; align-items: center; justify-content: center; height: 300px; }
+    .radar { width: 120px; height: 120px; border-radius: 50%; border: 1px solid rgba(0,240,255,0.1); position: relative; }
+    .radar::before {
+        content: ''; position: absolute; inset: 0; border-radius: 50%;
+        border: 2px solid transparent; border-top-color: var(--primary);
+        animation: spin 1s linear infinite; box-shadow: 0 0 20px rgba(0,240,255,0.4);
+    }
+    .radar::after {
+        content: ''; position: absolute; inset: 20%;
+        border-radius: 50%; border: 1px solid rgba(123, 97, 255, 0.6);
+        animation: pulse 2s ease-in-out infinite;
+    }
+    .loader-text { margin-top: 25px; color: var(--primary); font-family: monospace; letter-spacing: 4px; animation: blink 1.5s infinite; }
+
+    #result { display: none; }
+    #result.show { animation: holoReveal 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+    @keyframes holoReveal {
+        0% { opacity: 0; transform: translateY(30px) scale(0.95); filter: blur(8px); }
+        100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+    }
+
+    .location-time { display: flex; justify-content: space-between; color: var(--text-dim); font-size: 14px; margin-bottom: 20px; }
+    .location-time span { color: var(--primary); font-weight: bold; }
+
+    .main-display { text-align: center; margin-bottom: 30px; }
+    .temp-big {
+        font-size: 100px; font-weight: 200; line-height: 1;
+        background: linear-gradient(to bottom, #fff 30%, var(--primary));
+        -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        filter: drop-shadow(0 0 20px rgba(0,240,255,0.3));
+    }
+    .weather-text { font-size: 24px; letter-spacing: 6px; margin-top: 10px; color: #e0e6ed; }
+
+    .advice-box {
+        background: linear-gradient(90deg, rgba(0,240,255,0.1), transparent);
+        border-left: 3px solid var(--primary);
+        padding: 16px 20px; border-radius: 0 14px 14px 0; margin-bottom: 30px;
+    }
+    .advice-title { color: var(--primary); font-size: 14px; margin-bottom: 6px; letter-spacing: 1px; }
+    .advice-content { font-size: 15px; line-height: 1.6; color: #cdd6e0; }
+
+    .grid-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 30px; }
+    .data-card {
+        background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.05);
+        border-radius: 16px; padding: 16px 12px; text-align: center; transition: 0.3s;
+    }
+    .data-card:hover { background: rgba(0,240,255,0.06); border-color: rgba(0,240,255,0.3); }
+    .card-label { font-size: 12px; color: var(--text-dim); margin-bottom: 8px; letter-spacing: 1px; }
+    .card-value { font-size: 20px; color: #fff; font-weight: 600; }
+    .card-value span { font-size: 12px; color: var(--text-dim); font-weight: normal; }
+
+    .sandbox-section { margin-top: 30px; border-top: 1px dashed rgba(0, 240, 255, 0.2); padding-top: 25px; }
+    .sandbox-title { font-size: 14px; color: var(--primary); margin-bottom: 20px; letter-spacing: 2px; }
+    .sandbox-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 15px; }
+    .sandbox-date { font-size: 18px; font-weight: bold; color: #fff; }
+    .sandbox-temp-range { font-size: 14px; color: var(--primary); font-family: monospace; }
+
+    .neon-slider { -webkit-appearance: none; width: 100%; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; outline: none; margin-bottom: 25px; }
+    .neon-slider::-webkit-slider-thumb {
+        -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%;
+        background: var(--primary); cursor: pointer; box-shadow: 0 0 15px var(--primary); border: 2px solid #fff; transition: transform 0.1s;
+    }
+    .neon-slider::-webkit-slider-thumb:hover { transform: scale(1.2); }
+
+    .canvas-container { width: 100%; height: 160px; background: rgba(0,0,0,0.2); border-radius: 16px; border: 1px solid rgba(255,255,255,0.03); position: relative; overflow: hidden; margin-bottom: 20px; }
+    canvas { display: block; width: 100%; height: 100%; }
+
+    .rain-prob-container { margin-top: 10px; }
+    .rain-label { font-size: 12px; color: var(--text-dim); margin-bottom: 8px; display: flex; justify-content: space-between; }
+    .rain-label span { color: var(--primary); font-weight: bold; }
+    .rain-bar-bg { width: 100%; height: 8px; background: rgba(255,255,255,0.05); border-radius: 4px; overflow: hidden; }
+    .rain-bar-fill { height: 100%; width: 0%; border-radius: 4px; background: linear-gradient(90deg, #00f0ff, #7b61ff); transition: width 0.5s ease; }
+
+    .ai-section { margin-top: 30px; border-top: 1px dashed rgba(123, 97, 255, 0.3); padding-top: 25px; }
+    .ai-title { font-size: 14px; color: var(--secondary); margin-bottom: 15px; letter-spacing: 2px; }
+    .ai-row { display: flex; gap: 10px; }
+    .ai-row input {
+        flex: 1; padding: 12px 16px; border-radius: 12px;
+        border: 1px solid rgba(123, 97, 255, 0.3);
+        background: rgba(0,0,0,0.4); color: #fff; font-size: 15px; outline: none;
+    }
+    .ai-row button {
+        padding: 0 24px; border-radius: 12px; border: none;
+        background: linear-gradient(135deg, var(--secondary), #ff00ff);
+        color: #fff; font-weight: bold; cursor: pointer; letter-spacing: 1px;
+    }
+    .ai-result {
+        margin-top: 15px; padding: 16px; border-radius: 14px;
+        background: rgba(123, 97, 255, 0.08);
+        border-left: 3px solid var(--secondary);
+        font-size: 15px; line-height: 1.7; color: #e0d6ff;
+        min-height: 50px;
+    }
+
+    @keyframes spin { 100% { transform: rotate(360deg); } }
+    @keyframes pulse { 0%, 100% { transform: scale(1); opacity: 0.4; } 50% { transform: scale(1.3); opacity: 0.8; } }
+    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+</style>
+</head>
+<body>
+    <div class="bg"></div>
+    <div class="glass-panel">
+        <div class="search-header">
+            <input id="cityInput" placeholder="输入城市拼音，如 guangzhou" autofocus>
+            <button id="searchBtn" onclick="startQuery()">推演</button>
+        </div>
+
+        <div id="initialState">
+            <div class="standby-radar"></div>
+            <div class="standby-text">系统待命 · 等待指令</div>
+            <div class="quick-tips" onclick="document.getElementById('cityInput').value='guangzhou'; startQuery();">
+                [ 点击快速体验：guangzhou ]
+            </div>
+        </div>
+
+        <div id="loader">
+            <div class="radar"></div>
+            <div class="loader-text">正在扫描气象数据...</div>
+        </div>
+
+        <div id="result">
+            <div class="location-time">
+                <div>📍 定位：<span id="cityName">--</span></div>
+                <div id="updateTime">--:--</div>
+            </div>
+
+            <div class="main-display">
+                <div class="temp-big" id="tempBig">--</div>
+                <div class="weather-text" id="weatherDesc">--</div>
+            </div>
+
+            <div class="advice-box">
+
+                <div class="advice-title">✨ 行动推演建议</div>
+                <div class="advice-content" id="tipText">等待推演...</div>
+            </div>
+            <div class="advice-box" style="border-left-color: #ff6b6b;">
+    <div class="advice-title" style="color: #ff6b6b;">🩺 个人气象健康预警</div>
+    <div class="advice-content" id="healthWarnings" style="color: #ffb3b3;">等待检测...</div>
+</div>
+            <div class="grid-cards">
+                <div class="data-card"><div class="card-label">湿度</div><div class="card-value" id="valHumidity">--<span>%</span></div></div>
+                <div class="data-card"><div class="card-label">体感</div><div class="card-value" id="valFeels">--<span>°</span></div></div>
+                <div class="data-card"><div class="card-label">气压</div><div class="card-value" id="valPressure">--<span>hPa</span></div></div>
+                <div class="data-card"><div class="card-label">风向风力</div><div class="card-value" id="valWind" style="font-size: 16px;">--</div></div>
+                <div class="data-card"><div class="card-label">能见度</div><div class="card-value" id="valVisibility">--<span>km</span></div></div>
+                <div class="data-card"><div class="card-label">降水量</div><div class="card-value" id="valPrecip">--<span>mm</span></div></div>
+            </div>
+
+            <div class="sandbox-section">
+                <div class="sandbox-title">📊 时间推演沙盘 (未来7天)</div>
+                <div class="sandbox-header">
+                    <div class="sandbox-date" id="sandboxDate">--</div>
+                    <div class="sandbox-temp-range" id="sandboxTempRange">--</div>
+                </div>
+                <input type="range" id="timeSlider" class="neon-slider" min="0" max="6" value="0" step="1">
+                <div class="canvas-container">
+                    <canvas id="tempCanvas"></canvas>
+                </div>
+                <div class="rain-prob-container">
+                    <div class="rain-label"><span>平均降雨概率</span><span id="rainProbText">--%</span></div>
+                    <div class="rain-bar-bg"><div class="rain-bar-fill" id="rainBarFill"></div></div>
+                </div>
+            </div>
+
+            <div class="ai-section">
+                <div class="ai-title">🤖 AI 行动推演引擎</div>
+
+                <div class="ai-row">
+                    <input id="activityInput" placeholder="输入活动，如 跑步、露营、骑行" onkeydown="if(event.key==='Enter') deduce()">
+                    <button onclick="deduce()">推演</button>
+                </div>
+                <div class="ai-result" id="deduceResult">输入你的活动计划，AI 会结合当前天气给出风险与建议。</div>
+                            <div class="ai-section" style="margin-top: 20px; border-top-color: rgba(0,240,255,0.2);">
+                <div class="ai-title" style="color: var(--primary);">📜 历史查询记录</div>
+                <button onclick="loadHistory()" style="width: 100%; margin-bottom: 15px; padding: 10px; background: rgba(0, 240, 255, 0.1); border: 1px solid rgba(0, 240, 255, 0.3); color: #fff; border-radius: 10px; cursor: pointer;">查看最近查询</button>
+                <div id="historyList" style="font-size: 13px; color: var(--text-dim); line-height: 1.8;"></div>
+            </div>
+
+            </div>
+
+        </div>
+    </div>
+
+<script>
+    let forecastData = [];
+    let canvasCtx = null;
+
+    function animateValue(id, start, end, duration, suffix = "") {
+        const obj = document.getElementById(id);
+        if (!obj) return;
+        let startTimestamp = null;
+        const step = (timestamp) => {
+            if (!startTimestamp) startTimestamp = timestamp;
+            const progress = Math.min((timestamp - startTimestamp) / duration, 1);
+            const current = Math.floor(progress * (end - start) + start);
+            obj.innerHTML = current + suffix;
+            if (progress < 1) window.requestAnimationFrame(step);
+        };
+        window.requestAnimationFrame(step);
+    }
+
+    async function startQuery() {
+        const city = document.getElementById("cityInput").value.trim();
+        if (!city) return;
+
+        const initialState = document.getElementById("initialState");
+        if (initialState) initialState.style.display = "none";
+
+        const btn = document.getElementById("searchBtn");
+        const loader = document.getElementById("loader");
+        const result = document.getElementById("result");
+
+        btn.disabled = true;
+        result.classList.remove("show");
+        result.style.display = "none";
+        loader.style.display = "flex";
+
+        const startTime = Date.now();
+
+        try {
+            const response = await fetch("/api/weather?city=" + encodeURIComponent(city));
+            const data = await response.json();
+
+            const elapsedTime = Date.now() - startTime;
+            const remainingTime = Math.max(0, 1500 - elapsedTime);
+
+            setTimeout(() => {
+                loader.style.display = "none";
+                if (data.error) { alert("查询失败：" + data.error); btn.disabled = false; return; }
+
+                document.getElementById("cityName").textContent = city.toUpperCase();
+                document.getElementById("updateTime").textContent = new Date().toLocaleTimeString('zh-CN', {hour: '2-digit', minute:'2-digit'});
+
+                const cleanDesc = data.desc ? data.desc.trim() : "--";
+                document.getElementById("weatherDesc").textContent = cleanDesc;
+                document.getElementById("tipText").textContent = data.tip;
+
+                animateValue("tempBig", 0, parseInt(data.temp), 1000, "°");
+                animateValue("valHumidity", 0, parseInt(data.humidity), 800, "<span>%</span>");
+                animateValue("valFeels", 0, parseInt(data.feels), 800, "<span>°</span>");
+                animateValue("valPressure", 0, parseInt(data.pressure), 800, "<span>hPa</span>");
+                animateValue("valVisibility", 0, parseInt(data.visibility), 800, "<span>km</span>");
+                animateValue("valPrecip", 0, parseFloat(data.precip), 800, "<span>mm</span>");
+                document.getElementById("valWind").textContent = data.wind_dir + " " + data.wind_speed + "km/h";
+
+                if (data.forecast_7d && data.forecast_7d.length > 0) {
+                    forecastData = data.forecast_7d;
+                    const slider = document.getElementById("timeSlider");
+                    slider.max = forecastData.length - 1;
+                    slider.value = 0;
+
+                    canvasCtx = document.getElementById("tempCanvas").getContext("2d");
+                    updateSandbox(0);
+
+                    slider.oninput = function() {
+                        updateSandbox(this.value);
+                    };
+                }
+
+                result.style.display = "block";
+                void result.offsetWidth;
+                result.classList.add("show");
+                btn.disabled = false;
+
+            }, remainingTime);
+
+        } catch (error) {
+            loader.style.display = "none";
+            alert("网络请求失败，请确保后端已启动！");
+            btn.disabled = false;
+        }
+    }
+
+    function updateSandbox(index) {
+        if (!forecastData || forecastData.length === 0) return;
+        const day = forecastData[index];
+
+        const dateObj = new Date(day.date);
+        const month = dateObj.getMonth() + 1;
+        const dateNum = dateObj.getDate();
+        document.getElementById("sandboxDate").textContent = `${month}月${dateNum}日`;
+
+        const maxT = parseInt(day.maxtemp);
+        const minT = parseInt(day.mintemp);
+        document.getElementById("sandboxTempRange").textContent = `${minT}° ~ ${maxT}°`;
+
+        let totalRain = 0;
+        day.hourly.forEach(h => totalRain += parseInt(h.rain_chance));
+        const avgRain = Math.round(totalRain / day.hourly.length);
+        document.getElementById("rainProbText").textContent = avgRain + "%";
+        document.getElementById("rainBarFill").style.width = avgRain + "%";
+
+        drawCurve(day.hourly, maxT, minT);
+    }
+
+    function drawCurve(hourlyData, maxT, minT) {
+        const canvas = document.getElementById("tempCanvas");
+        const ctx = canvasCtx;
+
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width * window.devicePixelRatio;
+        canvas.height = rect.height * window.devicePixelRatio;
+        ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+        const w = rect.width;
+        const h = rect.height;
+        const padding = { top: 30, bottom: 30, left: 40, right: 20 };
+
+        ctx.clearRect(0, 0, w, h);
+
+        const temps = hourlyData.map(d => parseInt(d.temp));
+        const localMax = Math.max(...temps, parseInt(maxT));
+        const localMin = Math.min(...temps, parseInt(minT));
+        const tempRange = localMax - localMin || 1;
+
+        const points = [];
+        const stepX = (w - padding.left - padding.right) / (hourlyData.length - 1);
+
+        hourlyData.forEach((d, i) => {
+            const x = padding.left + i * stepX;
+            const y = h - padding.bottom - ((parseInt(d.temp) - localMin) / tempRange) * (h - padding.top - padding.bottom);
+            points.push({x, y, temp: d.temp, time: d.time});
+        });
+
+        let progress = 0;
+        const duration = 500;
+        let startTime = null;
+
+        function animate(timestamp) {
+            if (!startTime) startTime = timestamp;
+            progress = Math.min((timestamp - startTime) / duration, 1);
+
+            ctx.clearRect(0, 0, w, h);
+
+            ctx.beginPath();
+            ctx.strokeStyle = "rgba(0, 240, 255, 0.05)";
+            ctx.lineWidth = 1;
+            for (let i = 0; i <= 4; i++) {
+                const y = padding.top + (h - padding.top - padding.bottom) * (i / 4);
+                ctx.moveTo(padding.left, y);
+                ctx.lineTo(w - padding.right, y);
+            }
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.strokeStyle = "#00f0ff";
+            ctx.lineWidth = 2;
+            ctx.shadowBlur = 10;
+            ctx.shadowColor = "#00f0ff";
+
+            const currentLength = points.length * progress;
+
+            for (let i = 0; i < points.length; i++) {
+                if (i > currentLength) break;
+                if (i === 0) {
+                    ctx.moveTo(points[i].x, points[i].y);
+                } else {
+                    const xc = (points[i - 1].x + points[i].x) / 2;
+                    const yc = (points[i - 1].y + points[i].y) / 2;
+                    ctx.quadraticCurveTo(points[i - 1].x, points[i - 1].y, xc, yc);
+                }
+            }
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+
+            if (progress > 0.9) {
+                ctx.beginPath();
+                ctx.moveTo(points[0].x, h - padding.bottom);
+                points.forEach((p, i) => {
+                    if (i === 0) ctx.lineTo(p.x, p.y);
+                    else {
+                        const xc = (points[i - 1].x + p.x) / 2;
+                        const yc = (points[i - 1].y + p.y) / 2;
+                        ctx.quadraticCurveTo(points[i - 1].x, points[i - 1].y, xc, yc);
+                    }
+                });
+                ctx.lineTo(points[points.length - 1].x, h - padding.bottom);
+                ctx.closePath();
+
+                const gradient = ctx.createLinearGradient(0, padding.top, 0, h - padding.bottom);
+                gradient.addColorStop(0, "rgba(0, 240, 255, 0.2)");
+                gradient.addColorStop(1, "rgba(0, 240, 255, 0)");
+                ctx.fillStyle = gradient;
+                ctx.fill();
+            }
+
+            points.forEach((p, i) => {
+                if (i > currentLength) return;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, i === Math.floor(currentLength) ? 4 : 2, 0, Math.PI * 2);
+                ctx.fillStyle = i === Math.floor(currentLength) ? "#fff" : "#00f0ff";
+                ctx.fill();
+                if (i === Math.floor(currentLength)) {
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, 8, 0, Math.PI * 2);
+                    ctx.fillStyle = "rgba(0, 240, 255, 0.4)";
+                    ctx.fill();
+                }
+            });
+
+            if (progress < 1) window.requestAnimationFrame(animate);
+        }
+        window.requestAnimationFrame(animate);
+    }
+
+    async function deduce() {
+        const city = document.getElementById("cityInput").value.trim() || "guangzhou";
+        const activity = document.getElementById("activityInput").value.trim();
+        if (!activity) { alert("请输入活动！"); return; }
+
+        const resultBox = document.getElementById("deduceResult");
+        resultBox.textContent = "🤖 AI 正在推演中，请稍候...";
+
+        try {
+            const r = await fetch("/api/deduce?city=" + encodeURIComponent(city) + "&activity=" + encodeURIComponent(activity));
+            const d = await r.json();
+            if (d.error) {
+                resultBox.textContent = "❌ 推演失败：" + d.error;
+            } else {
+                resultBox.textContent = "✅ " + d.result;
+            }
+        } catch (e) {
+            resultBox.textContent = "❌ 网络错误，请检查后端。";
+        }
+    }
+
+    document.getElementById("cityInput").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") startQuery();
+    });    async function loadHistory() {
+        const box = document.getElementById("historyList");
+        box.innerHTML = "加载中...";
+        try {
+            const r = await fetch("/api/history");
+            const d = await r.json();
+            box.innerHTML = "";
+            if (data.health_warnings && data.health_warnings.length > 0) {
+    document.getElementById("healthWarnings").innerHTML = data.health_warnings.join("<br>");
+}
+            if (d.length === 0) { box.innerText = "暂无记录"; return; }
+            d.forEach(item => {
+                let text = `🕒 ${item.created_at} | 📍 ${item.city} | 🌡 ${item.temp}° | ${item.desc}`;
+                if (item.activity) text += `<br>🤖 AI推演(${item.activity}): ${item.ai_result}`;
+                box.innerHTML += `<div style="margin-bottom:10px; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:5px;">${text}</div>`;
+            });
+        } catch (e) {
+            box.innerText = "加载失败";
+        }
+    }
+</script>
+</body>
+</html>
